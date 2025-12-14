@@ -1,6 +1,6 @@
 # resetgen
 
-Generate allocation-free `Reset()` methods for your structs. Perfect for `sync.Pool` usage.
+Generate allocation-free `Reset()` methods for your structs. Perfect for [`sync.Pool`](https://pkg.go.dev/sync) usage.
 
 ## Installation
 

@@ -111,12 +111,12 @@ func isSyncPoolMethod(sel *ast.SelectorExpr, info *types.Info) bool {
 	}
 
 	t := tv.Type
-	if ptr, ok := t.(*types.Pointer); ok {
+	if ptr, isPtr := t.(*types.Pointer); isPtr {
 		t = ptr.Elem()
 	}
 
-	named, ok := t.(*types.Named)
-	if !ok {
+	named, isNamed := t.(*types.Named)
+	if !isNamed {
 		return false
 	}
 

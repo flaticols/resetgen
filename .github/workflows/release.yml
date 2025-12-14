@@ -44,7 +44,17 @@ jobs:
           fi
 
       - name: Bump version
+        id: bump
         if: steps.bump-type.outputs.type != ''
-        run: bump ${{ steps.bump-type.outputs.type }} --brave
+        run: |
+          bump ${{ steps.bump-type.outputs.type }} --brave
+          echo "tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          generate_release_notes: true

@@ -1,0 +1,35 @@
+# Binaries
+resetgen
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+__debug_bin*
+
+# Vendor (if not committed)
+# vendor/
+
+# Local env
+.env
+.env.local

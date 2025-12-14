@@ -33,3 +33,7 @@ __debug_bin*
 # Local env
 .env
 .env.local
+
+# Go workspace
+go.work
+go.work.sum

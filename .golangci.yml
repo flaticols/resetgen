@@ -1,0 +1,39 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: standard
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - gocritic
+    - gocyclo
+    - gosec
+  disable:
+    - depguard
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    gocyclo:
+      min-complexity: 25
+  exclusions:
+    generated: lax
+    paths:
+      - testdata
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+run:
+  timeout: 5m

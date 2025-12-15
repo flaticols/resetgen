@@ -42,7 +42,6 @@ func main() {
 		return
 	}
 
-	// Parse -structs flag into a map for efficient lookup
 	var structFilter map[string]bool
 	if structsFlag != "" {
 		structFilter = make(map[string]bool)
@@ -53,9 +52,7 @@ func main() {
 				continue
 			}
 
-			// Check if it's package-qualified (contains .)
 			if strings.Contains(name, ".") {
-				// Validate package-qualified format: Package.Struct
 				parts := strings.Split(name, ".")
 				if len(parts) != 2 {
 					fmt.Fprintf(os.Stderr, "resetgen: invalid format %s (use Package.Struct)\n", name)
@@ -64,13 +61,11 @@ func main() {
 				pkgPath := parts[0]
 				structName := parts[1]
 
-				// Validate struct name
 				if !isValidGoIdentifier(structName) {
 					fmt.Fprintf(os.Stderr, "resetgen: invalid struct name in %s: %s\n", name, structName)
 					os.Exit(1)
 				}
 
-				// Validate package path (lowercase, dots, slashes allowed)
 				if !isValidPackagePath(pkgPath) {
 					fmt.Fprintf(os.Stderr, "resetgen: invalid package path in %s: %s\n", name, pkgPath)
 					os.Exit(1)
@@ -78,7 +73,6 @@ func main() {
 
 				structFilter[name] = true
 			} else {
-				// Simple name - validate that it's a valid Go identifier
 				if !isValidGoIdentifier(name) {
 					fmt.Fprintf(os.Stderr, "resetgen: invalid struct name: %s\n", name)
 					os.Exit(1)
@@ -87,7 +81,6 @@ func main() {
 			}
 		}
 
-		// Empty list after trimming means process nothing
 		if len(structFilter) == 0 {
 			fmt.Fprintln(os.Stderr, "resetgen: -structs flag is empty, nothing to process")
 			os.Exit(0)
@@ -96,12 +89,9 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		// Check for go generate environment
 		if gofile := os.Getenv("GOFILE"); gofile != "" {
-			// Running via go generate - process current file
 			args = []string{gofile}
 		} else {
-			// Default: process current directory
 			args = []string{"."}
 		}
 	}
@@ -112,6 +102,9 @@ func main() {
 	}
 }
 
+// run processes Go files found by the given patterns and generates Reset() methods for structs
+// that match the structFilter (or have reset tags/directives if no filter is provided).
+// If dryRun is true, generated code is printed instead of written to files.
 func run(patterns []string, dryRun bool, structFilter map[string]bool) error {
 	files, err := findFiles(patterns)
 	if err != nil {
@@ -140,12 +133,14 @@ func run(patterns []string, dryRun bool, structFilter map[string]bool) error {
 	return nil
 }
 
+// findFiles resolves file patterns (e.g., "./...", "./pkg", "file.go") to a list of Go source files.
+// Patterns ending with "/..." recursively walk the directory tree. Hidden directories, vendor,
+// and testdata directories are skipped. Test files and generated files are excluded.
 func findFiles(patterns []string) ([]string, error) {
 	var files []string
 	seen := make(map[string]bool)
 
 	for _, pattern := range patterns {
-		// Handle ./... pattern
 		if strings.HasSuffix(pattern, "/...") {
 			dir := strings.TrimSuffix(pattern, "/...")
 			if dir == "." || dir == "" {
@@ -156,7 +151,6 @@ func findFiles(patterns []string) ([]string, error) {
 					return err
 				}
 				if info.IsDir() {
-					// Skip hidden directories and testdata
 					name := info.Name()
 					if strings.HasPrefix(name, ".") || name == "testdata" || name == "vendor" {
 						return filepath.SkipDir
@@ -175,14 +169,12 @@ func findFiles(patterns []string) ([]string, error) {
 			continue
 		}
 
-		// Check if it's a directory
 		info, err := os.Stat(pattern)
 		if err != nil {
 			return nil, err
 		}
 
 		if info.IsDir() {
-			// Process all Go files in directory
 			entries, err := os.ReadDir(pattern)
 			if err != nil {
 				return nil, err
@@ -198,7 +190,6 @@ func findFiles(patterns []string) ([]string, error) {
 				}
 			}
 		} else if isGoSourceFile(pattern) && !seen[pattern] {
-			// Single file
 			files = append(files, pattern)
 			seen[pattern] = true
 		}
@@ -207,29 +198,29 @@ func findFiles(patterns []string) ([]string, error) {
 	return files, nil
 }
 
+// isGoSourceFile returns true if the path is a Go source file that should be processed.
+// Excludes test files (*_test.go) and generated files (*.gen.go).
 func isGoSourceFile(path string) bool {
 	if !strings.HasSuffix(path, ".go") {
 		return false
 	}
-	// Skip test files and generated files
 	base := filepath.Base(path)
-	if strings.HasSuffix(base, "_test.go") {
-		return false
-	}
-	if strings.HasSuffix(base, ".gen.go") {
+	if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, ".gen.go") {
 		return false
 	}
 	return true
 }
 
+// processFile parses a Go file, applies struct filtering, generates Reset() methods,
+// and writes the result to a .gen.go file. Returns true if at least one struct was processed.
+// Parsed structs are filtered by structFilter if provided; otherwise all structs with
+// reset tags or directives are processed.
 func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, error) {
-	// First parse to get package name
 	info, err := parser.ParseFile(path, nil)
 	if err != nil {
 		return false, err
 	}
 
-	// If we have a struct filter, apply package-aware filtering
 	if structFilter != nil && len(info.Structs) > 0 {
 		var filteredStructs []types.StructInfo
 		for _, s := range info.Structs {
@@ -244,7 +235,6 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 		return false, nil
 	}
 
-	// Warn about structs that were requested but not found
 	if structFilter != nil {
 		warnUnfoundStructs(info, structFilter)
 	}
@@ -254,10 +244,8 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 		return false, nil
 	}
 
-	// Format the generated code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
-		// If formatting fails, write unformatted code (useful for debugging)
 		formatted = []byte(code)
 	}
 
@@ -267,7 +255,6 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 		return true, nil
 	}
 
-	// Write to .gen.go file
 	outPath := outputPath(path)
 	if err := os.WriteFile(outPath, formatted, 0o644); err != nil { //nolint:gosec // generated code should be world-readable
 		return false, err
@@ -277,12 +264,14 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 	return true, nil
 }
 
+// outputPath returns the .gen.go file path for a given input file.
 func outputPath(inputPath string) string {
 	ext := filepath.Ext(inputPath)
 	base := strings.TrimSuffix(inputPath, ext)
 	return base + ".gen.go"
 }
 
+// printVersion prints the version information, preferring VCS revision if available.
 func printVersion() {
 	info, ok := debug.ReadBuildInfo()
 	if ok {
@@ -298,64 +287,62 @@ func printVersion() {
 	fmt.Println("resetgen", "dev")
 }
 
-// shouldProcessStruct checks if a struct should be processed based on the filter.
-// Supports both simple names (e.g., "User") and package-qualified names (e.g., "models.User").
+// shouldProcessStruct determines if a struct should be processed based on the filter.
+// Returns true if:
+//   - filter is nil (no filtering)
+//   - structName matches a simple name entry in filter (matches any package)
+//   - pkgName.structName matches a qualified name entry in filter
 func shouldProcessStruct(structName, pkgName string, filter map[string]bool) bool {
 	if filter == nil {
 		return true
 	}
 
-	// Check simple name match (e.g., "User")
 	if filter[structName] {
 		return true
 	}
 
-	// Check package-qualified match (e.g., "models.User")
 	qualifiedName := pkgName + "." + structName
 	return filter[qualifiedName]
 }
 
-// warnUnfoundStructs warns about structs specified in the filter that were not found.
+// warnUnfoundStructs emits warnings for structs specified in the filter but not found in the file.
+// Only warns for entries relevant to this file's package; qualified names are only warned if
+// they match this package, while simple names always trigger warnings if not found.
 func warnUnfoundStructs(info *types.FileInfo, structFilter map[string]bool) {
 	if len(structFilter) == 0 {
 		return
 	}
 
-	// Build set of found struct names (both simple and qualified)
 	foundNames := make(map[string]bool)
 	for _, s := range info.Structs {
 		foundNames[s.Name] = true
 		foundNames[info.PkgName+"."+s.Name] = true
 	}
 
-	// Warn about requested structs not found
 	for name := range structFilter {
-		// Only warn if relevant to this package
 		if strings.Contains(name, ".") {
-			// Qualified name - only warn if it's for this package
 			parts := strings.Split(name, ".")
 			if parts[0] == info.PkgName && !foundNames[name] {
 				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", parts[1], info.Path)
 			}
 		} else if !foundNames[name] {
-			// Simple name - always warn if not found (may warn multiple times if same name in multiple packages)
 			fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, info.Path)
 		}
 	}
 }
 
-// isValidGoIdentifier checks if a name is a valid exported Go identifier.
+// isValidGoIdentifier reports whether name is a valid exported Go identifier.
+// Valid identifiers must start with an uppercase letter and contain only uppercase/lowercase
+// letters, digits, or underscores.
 func isValidGoIdentifier(name string) bool {
 	if len(name) == 0 {
 		return false
 	}
 
-	// Must start with uppercase letter (we only allow exported structs)
 	if name[0] < 'A' || name[0] > 'Z' {
 		return false
 	}
 
-	// Rest must be letters, digits, or underscore
 	for i := 1; i < len(name); i++ {
 		c := name[i]
 		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') &&
@@ -367,20 +354,18 @@ func isValidGoIdentifier(name string) bool {
 	return true
 }
 
-// isValidPackagePath checks if a string is a valid package path.
-// Allows lowercase letters, digits, dots, slashes, and underscores.
-// Cannot start with a dot.
+// isValidPackagePath reports whether path is a valid Go package path for filtering.
+// Valid paths contain only lowercase letters, digits, dots, slashes, and underscores,
+// and must not start with a dot. Examples: "models", "api.v1", "internal/api".
 func isValidPackagePath(path string) bool {
 	if len(path) == 0 {
 		return false
 	}
 
-	// Cannot start with a dot
 	if path[0] == '.' {
 		return false
 	}
 
-	// Package paths can contain lowercase letters, digits, dots, slashes, and underscores
 	for _, c := range path {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') &&
 			c != '.' && c != '/' && c != '_' {

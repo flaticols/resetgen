@@ -69,6 +69,90 @@ func (s *Request) Reset() {
 | `reset:"value"` | Default value |
 | `reset:"-"` | Skip field |
 
+## CLI Flag Syntax
+
+### `-structs` Flag
+
+Specify which structs to generate using the `-structs` flag:
+
+```bash
+//go:generate resetgen -structs User,Order,Config
+
+# Or with multiple files
+resetgen -structs User,Order,Config ./...
+```
+
+When `-structs` is specified:
+- **ONLY** the listed structs are processed (tags and directives are ignored for struct selection)
+- All exported fields are reset to zero values
+- Field-level `reset` tags still work for custom values or to skip specific fields
+
+**Example:**
+```go
+//go:generate resetgen -structs User,Order
+
+type User struct {
+    ID      int64
+    Name    string
+    Secret  string `reset:"-"` // Still respected - field will not be reset
+}
+
+type Order struct {
+    ID    int64
+    Items []string
+    Total float64 `reset:"0.0"` // Custom value still works
+}
+
+type Logger struct {
+    Level string  // Will NOT be generated (not in -structs list)
+}
+```
+
+## Directive Syntax
+
+Use the `+resetgen` comment directive to mark structs for automatic `Reset()` generation without tagging every field:
+
+```go
+//go:generate resetgen
+
+package main
+
+// +resetgen
+type Request struct {
+    ID      string            // defaults to zero value
+    Method  string            // defaults to zero value
+    Headers map[string]string // defaults to zero value
+    Secret  string `reset:"-"` // skipped from reset
+}
+```
+
+Generated `request.gen.go`:
+
+```go
+func (s *Request) Reset() {
+    s.ID = ""
+    s.Method = ""
+    clear(s.Headers)  // preserves capacity
+    // Secret is not reset (reset:"-")
+}
+```
+
+### How Directive Works
+
+- **Struct Selection**: Structs are processed if they have a `+resetgen` comment OR contain `reset` tags
+- **Field Processing**: All exported fields are reset to zero values
+- **Custom Values**: Fields with explicit `reset` tags use their specified values
+- **Skip Fields**: Use `reset:"-"` to exclude specific fields from reset
+- **Unexported Fields**: Private fields (lowercase) are automatically skipped for safety
+
+### Directive Formats
+
+All of these are recognized:
+- `//+resetgen`
+- `// +resetgen`
+- `//  +resetgen`
+- `/* +resetgen */`
+
 ## Features
 
 - **Allocation-free** — slices truncate (`s[:0]`), maps clear (`clear(m)`)

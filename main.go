@@ -17,10 +17,12 @@ func main() {
 	var (
 		showVersion bool
 		dryRun      bool
+		structsFlag string
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&dryRun, "dry-run", false, "print generated code instead of writing files")
+	flag.StringVar(&structsFlag, "structs", "", "comma-separated list of struct names to process (e.g., User,Order,Config)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: resetgen [flags] [patterns...]\n\n")
 		fmt.Fprintf(os.Stderr, "Generate Reset() methods for structs with reset tags.\n\n")
@@ -39,6 +41,31 @@ func main() {
 		return
 	}
 
+	// Parse -structs flag into a map for efficient lookup
+	var structFilter map[string]bool
+	if structsFlag != "" {
+		structFilter = make(map[string]bool)
+		names := strings.Split(structsFlag, ",")
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			// Validate that it's a valid Go identifier
+			if !isValidGoIdentifier(name) {
+				fmt.Fprintf(os.Stderr, "resetgen: invalid struct name: %s\n", name)
+				os.Exit(1)
+			}
+			structFilter[name] = true
+		}
+
+		// Empty list after trimming means process nothing
+		if len(structFilter) == 0 {
+			fmt.Fprintln(os.Stderr, "resetgen: -structs flag is empty, nothing to process")
+			os.Exit(0)
+		}
+	}
+
 	args := flag.Args()
 	if len(args) == 0 {
 		// Check for go generate environment
@@ -51,13 +78,13 @@ func main() {
 		}
 	}
 
-	if err := run(args, dryRun); err != nil {
+	if err := run(args, dryRun, structFilter); err != nil {
 		fmt.Fprintf(os.Stderr, "resetgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(patterns []string, dryRun bool) error {
+func run(patterns []string, dryRun bool, structFilter map[string]bool) error {
 	files, err := findFiles(patterns)
 	if err != nil {
 		return err
@@ -69,7 +96,7 @@ func run(patterns []string, dryRun bool) error {
 
 	processed := 0
 	for _, file := range files {
-		ok, err := processFile(file, dryRun)
+		ok, err := processFile(file, dryRun, structFilter)
 		if err != nil {
 			return fmt.Errorf("%s: %w", file, err)
 		}
@@ -167,14 +194,27 @@ func isGoSourceFile(path string) bool {
 	return true
 }
 
-func processFile(path string, dryRun bool) (bool, error) {
-	info, err := parser.ParseFile(path)
+func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, error) {
+	info, err := parser.ParseFile(path, structFilter)
 	if err != nil {
 		return false, err
 	}
 
 	if len(info.Structs) == 0 {
 		return false, nil
+	}
+
+	// Warn about structs that were requested but not found
+	if structFilter != nil && len(info.Structs) < len(structFilter) {
+		foundNames := make(map[string]bool)
+		for _, s := range info.Structs {
+			foundNames[s.Name] = true
+		}
+		for name := range structFilter {
+			if !foundNames[name] {
+				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, path)
+			}
+		}
 	}
 
 	code := generator.Generate(info)
@@ -224,4 +264,27 @@ func printVersion() {
 		return
 	}
 	fmt.Println("resetgen", "dev")
+}
+
+// isValidGoIdentifier checks if a name is a valid exported Go identifier.
+func isValidGoIdentifier(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	// Must start with uppercase letter (we only allow exported structs)
+	if name[0] < 'A' || name[0] > 'Z' {
+		return false
+	}
+
+	// Rest must be letters, digits, or underscore
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+
+	return true
 }

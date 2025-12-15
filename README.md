@@ -24,8 +24,35 @@ go install github.com/flaticols/resetgen@latest
 Or add as a tool dependency (Go 1.24+):
 
 ```bash
-go get -tool github.com/flaticols/resetgen
+go get -tool github.com/flaticols/resetgen@latest
 ```
+
+### Go 1.24+ Tool Mechanism
+
+Go 1.24 introduced the ability to manage CLI tools as dependencies. You can declare tool requirements in `go.mod`:
+
+```go
+tool (
+    github.com/flaticols/resetgen
+)
+```
+
+Run with `go tool`:
+
+```bash
+# Generate from current package
+go tool resetgen
+
+# Generate from specific packages
+go tool resetgen ./...
+go tool resetgen ./cmd ./internal
+
+# With flags
+go tool resetgen -structs User,Order ./...
+go tool resetgen -version
+```
+
+This approach keeps your tool versions synchronized with your project, just like regular dependencies.
 
 ### Usage
 
@@ -107,6 +134,52 @@ type Logger struct {
     Level string  // Will NOT be generated (not in -structs list)
 }
 ```
+
+### Package-Qualified Names
+
+When you have structs with the same name in different packages, use package-qualified names:
+
+```bash
+# Process User in models package only
+resetgen -structs models.User ./...
+
+# Process User in both models and api packages
+resetgen -structs models.User,api.User ./...
+
+# Mix simple and qualified names
+resetgen -structs Order,models.User ./...
+```
+
+**Rules:**
+- Simple name (`User`) → processes ALL User structs in all packages
+- Qualified name (`models.User`) → processes only User in models package
+- Package path uses Go import path format (lowercase with dots/slashes)
+
+**Example with multiple packages:**
+```go
+// models/user.go
+//go:generate resetgen -structs models.User,api.User
+
+package models
+
+type User struct {
+    ID    int64  `reset:""`
+    Name  string `reset:""`
+    Email string `reset:""`
+}
+
+// api/user.go
+//go:generate resetgen -structs models.User,api.User
+
+package api
+
+type User struct {
+    ID       string `reset:""`
+    Status   string `reset:"active"`
+}
+```
+
+Both packages can use the same go:generate directive with package-qualified names, and each will generate only its own Reset() method.
 
 ## Directive Syntax
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/flaticols/resetgen/internal/generator"
 	"github.com/flaticols/resetgen/internal/parser"
+	"github.com/flaticols/resetgen/internal/types"
 )
 
 func main() {
@@ -51,12 +52,39 @@ func main() {
 			if name == "" {
 				continue
 			}
-			// Validate that it's a valid Go identifier
-			if !isValidGoIdentifier(name) {
-				fmt.Fprintf(os.Stderr, "resetgen: invalid struct name: %s\n", name)
-				os.Exit(1)
+
+			// Check if it's package-qualified (contains .)
+			if strings.Contains(name, ".") {
+				// Validate package-qualified format: Package.Struct
+				parts := strings.Split(name, ".")
+				if len(parts) != 2 {
+					fmt.Fprintf(os.Stderr, "resetgen: invalid format %s (use Package.Struct)\n", name)
+					os.Exit(1)
+				}
+				pkgPath := parts[0]
+				structName := parts[1]
+
+				// Validate struct name
+				if !isValidGoIdentifier(structName) {
+					fmt.Fprintf(os.Stderr, "resetgen: invalid struct name in %s: %s\n", name, structName)
+					os.Exit(1)
+				}
+
+				// Validate package path (lowercase, dots, slashes allowed)
+				if !isValidPackagePath(pkgPath) {
+					fmt.Fprintf(os.Stderr, "resetgen: invalid package path in %s: %s\n", name, pkgPath)
+					os.Exit(1)
+				}
+
+				structFilter[name] = true
+			} else {
+				// Simple name - validate that it's a valid Go identifier
+				if !isValidGoIdentifier(name) {
+					fmt.Fprintf(os.Stderr, "resetgen: invalid struct name: %s\n", name)
+					os.Exit(1)
+				}
+				structFilter[name] = true
 			}
-			structFilter[name] = true
 		}
 
 		// Empty list after trimming means process nothing
@@ -195,9 +223,21 @@ func isGoSourceFile(path string) bool {
 }
 
 func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, error) {
-	info, err := parser.ParseFile(path, structFilter)
+	// First parse to get package name
+	info, err := parser.ParseFile(path, nil)
 	if err != nil {
 		return false, err
+	}
+
+	// If we have a struct filter, apply package-aware filtering
+	if structFilter != nil && len(info.Structs) > 0 {
+		var filteredStructs []types.StructInfo
+		for _, s := range info.Structs {
+			if shouldProcessStruct(s.Name, info.PkgName, structFilter) {
+				filteredStructs = append(filteredStructs, s)
+			}
+		}
+		info.Structs = filteredStructs
 	}
 
 	if len(info.Structs) == 0 {
@@ -205,16 +245,8 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 	}
 
 	// Warn about structs that were requested but not found
-	if structFilter != nil && len(info.Structs) < len(structFilter) {
-		foundNames := make(map[string]bool)
-		for _, s := range info.Structs {
-			foundNames[s.Name] = true
-		}
-		for name := range structFilter {
-			if !foundNames[name] {
-				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, path)
-			}
-		}
+	if structFilter != nil {
+		warnUnfoundStructs(info, structFilter)
 	}
 
 	code := generator.Generate(info)
@@ -266,6 +298,58 @@ func printVersion() {
 	fmt.Println("resetgen", "dev")
 }
 
+// shouldProcessStruct checks if a struct should be processed based on the filter.
+// Supports both simple names (e.g., "User") and package-qualified names (e.g., "models.User").
+func shouldProcessStruct(structName, pkgName string, filter map[string]bool) bool {
+	if filter == nil {
+		return true
+	}
+
+	// Check simple name match (e.g., "User")
+	if filter[structName] {
+		return true
+	}
+
+	// Check package-qualified match (e.g., "models.User")
+	qualifiedName := pkgName + "." + structName
+	if filter[qualifiedName] {
+		return true
+	}
+
+	return false
+}
+
+// warnUnfoundStructs warns about structs specified in the filter that were not found.
+func warnUnfoundStructs(info *types.FileInfo, structFilter map[string]bool) {
+	if len(structFilter) == 0 {
+		return
+	}
+
+	// Build set of found struct names (both simple and qualified)
+	foundNames := make(map[string]bool)
+	for _, s := range info.Structs {
+		foundNames[s.Name] = true
+		foundNames[info.PkgName+"."+s.Name] = true
+	}
+
+	// Warn about requested structs not found
+	for name := range structFilter {
+		// Only warn if relevant to this package
+		if strings.Contains(name, ".") {
+			// Qualified name - only warn if it's for this package
+			parts := strings.Split(name, ".")
+			if parts[0] == info.PkgName && !foundNames[name] {
+				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", parts[1], info.Path)
+			}
+		} else {
+			// Simple name - always warn if not found (may warn multiple times if same name in multiple packages)
+			if !foundNames[name] {
+				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, info.Path)
+			}
+		}
+	}
+}
+
 // isValidGoIdentifier checks if a name is a valid exported Go identifier.
 func isValidGoIdentifier(name string) bool {
 	if len(name) == 0 {
@@ -282,6 +366,30 @@ func isValidGoIdentifier(name string) bool {
 		c := name[i]
 		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 			(c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isValidPackagePath checks if a string is a valid package path.
+// Allows lowercase letters, digits, dots, slashes, and underscores.
+// Cannot start with a dot.
+func isValidPackagePath(path string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	// Cannot start with a dot
+	if path[0] == '.' {
+		return false
+	}
+
+	// Package paths can contain lowercase letters, digits, dots, slashes, and underscores
+	for _, c := range path {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '.' || c == '/' || c == '_') {
 			return false
 		}
 	}

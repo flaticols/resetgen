@@ -322,7 +322,6 @@ func warnUnfoundStructs(info *types.FileInfo, structFilter map[string]bool) {
 	}
 }
 
-// isValidGoIdentifier reports whether name is a valid exported Go identifier.
 func isValidGoIdentifier(name string) bool {
 	if len(name) == 0 {
 		return false
@@ -343,7 +342,6 @@ func isValidGoIdentifier(name string) bool {
 	return true
 }
 
-// isValidPackagePath reports whether path is a valid Go package path for filtering.
 func isValidPackagePath(path string) bool {
 	if len(path) == 0 {
 		return false

@@ -198,8 +198,6 @@ func findFiles(patterns []string) ([]string, error) {
 	return files, nil
 }
 
-// isGoSourceFile returns true if the path is a Go source file that should be processed.
-// Excludes test files (*_test.go) and generated files (*.gen.go).
 func isGoSourceFile(path string) bool {
 	if !strings.HasSuffix(path, ".go") {
 		return false
@@ -264,14 +262,12 @@ func processFile(path string, dryRun bool, structFilter map[string]bool) (bool, 
 	return true, nil
 }
 
-// outputPath returns the .gen.go file path for a given input file.
 func outputPath(inputPath string) string {
 	ext := filepath.Ext(inputPath)
 	base := strings.TrimSuffix(inputPath, ext)
 	return base + ".gen.go"
 }
 
-// printVersion prints the version information, preferring VCS revision if available.
 func printVersion() {
 	info, ok := debug.ReadBuildInfo()
 	if ok {
@@ -287,11 +283,6 @@ func printVersion() {
 	fmt.Println("resetgen", "dev")
 }
 
-// shouldProcessStruct determines if a struct should be processed based on the filter.
-// Returns true if:
-//   - filter is nil (no filtering)
-//   - structName matches a simple name entry in filter (matches any package)
-//   - pkgName.structName matches a qualified name entry in filter
 func shouldProcessStruct(structName, pkgName string, filter map[string]bool) bool {
 	if filter == nil {
 		return true
@@ -332,8 +323,6 @@ func warnUnfoundStructs(info *types.FileInfo, structFilter map[string]bool) {
 }
 
 // isValidGoIdentifier reports whether name is a valid exported Go identifier.
-// Valid identifiers must start with an uppercase letter and contain only uppercase/lowercase
-// letters, digits, or underscores.
 func isValidGoIdentifier(name string) bool {
 	if len(name) == 0 {
 		return false
@@ -355,8 +344,6 @@ func isValidGoIdentifier(name string) bool {
 }
 
 // isValidPackagePath reports whether path is a valid Go package path for filtering.
-// Valid paths contain only lowercase letters, digits, dots, slashes, and underscores,
-// and must not start with a dot. Examples: "models", "api.v1", "internal/api".
 func isValidPackagePath(path string) bool {
 	if len(path) == 0 {
 		return false

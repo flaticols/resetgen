@@ -312,11 +312,7 @@ func shouldProcessStruct(structName, pkgName string, filter map[string]bool) boo
 
 	// Check package-qualified match (e.g., "models.User")
 	qualifiedName := pkgName + "." + structName
-	if filter[qualifiedName] {
-		return true
-	}
-
-	return false
+	return filter[qualifiedName]
 }
 
 // warnUnfoundStructs warns about structs specified in the filter that were not found.
@@ -341,11 +337,9 @@ func warnUnfoundStructs(info *types.FileInfo, structFilter map[string]bool) {
 			if parts[0] == info.PkgName && !foundNames[name] {
 				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", parts[1], info.Path)
 			}
-		} else {
+		} else if !foundNames[name] {
 			// Simple name - always warn if not found (may warn multiple times if same name in multiple packages)
-			if !foundNames[name] {
-				fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, info.Path)
-			}
+			fmt.Fprintf(os.Stderr, "resetgen: warning: struct %s not found in %s\n", name, info.Path)
 		}
 	}
 }
@@ -364,8 +358,8 @@ func isValidGoIdentifier(name string) bool {
 	// Rest must be letters, digits, or underscore
 	for i := 1; i < len(name); i++ {
 		c := name[i]
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') || c == '_') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') &&
+			(c < '0' || c > '9') && c != '_' {
 			return false
 		}
 	}
@@ -388,8 +382,8 @@ func isValidPackagePath(path string) bool {
 
 	// Package paths can contain lowercase letters, digits, dots, slashes, and underscores
 	for _, c := range path {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-			c == '.' || c == '/' || c == '_') {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') &&
+			c != '.' && c != '/' && c != '_' {
 			return false
 		}
 	}

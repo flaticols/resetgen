@@ -106,17 +106,15 @@ func ParseSourceWithFilter(src string, structFilter map[string]bool) (*types.Fil
 	return info, nil
 }
 
-// hasResetgenDirective checks if a GenDecl has the +resetgen comment directive.
-// Accepts: "//+resetgen", "// +resetgen", "/*+resetgen*/", etc.
+// hasResetgenDirective reports whether genDecl has the +resetgen comment directive.
+// Recognizes various formats: "//+resetgen", "// +resetgen", "/*+resetgen*/", etc.
 func hasResetgenDirective(genDecl *ast.GenDecl) bool {
 	if genDecl.Doc == nil {
 		return false
 	}
 
 	for _, comment := range genDecl.Doc.List {
-		// Handle // comments
 		text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
-		// Handle /* */ comments
 		text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
 		text = strings.TrimSuffix(strings.TrimSpace(text), "*/")
 
@@ -128,7 +126,8 @@ func hasResetgenDirective(genDecl *ast.GenDecl) bool {
 	return false
 }
 
-// isExportedType checks if an embedded type is exported.
+// isExportedType reports whether expr refers to an exported type.
+// Pointer-to-type and package-qualified types are considered exported.
 func isExportedType(expr ast.Expr) bool {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -136,14 +135,13 @@ func isExportedType(expr ast.Expr) bool {
 	case *ast.StarExpr:
 		return isExportedType(t.X)
 	case *ast.SelectorExpr:
-		// Package-qualified types (e.g., pkg.Type) are exported
 		return true
 	default:
 		return false
 	}
 }
 
-// checkHasResetTag checks if any field in the struct has a reset tag.
+// checkHasResetTag reports whether any field in the struct has a reset tag.
 func checkHasResetTag(fields *ast.FieldList) bool {
 	for _, field := range fields.List {
 		if field.Tag != nil {
@@ -155,21 +153,22 @@ func checkHasResetTag(fields *ast.FieldList) bool {
 	return false
 }
 
+// parseStruct extracts struct field information based on reset tags and directives.
+// When structFilter is provided, all exported fields are included; otherwise only
+// fields with reset tags or structs with +resetgen directives are processed.
+// Returns nil if the struct should not be processed or has no non-ignored fields.
 func parseStruct(name string, st *ast.StructType, genDecl *ast.GenDecl, structFilter map[string]bool) *types.StructInfo {
 	if st.Fields == nil {
 		return nil
 	}
 
-	// Determine if this struct should be processed
 	var shouldProcess bool
 	var processAllExported bool
 
 	if structFilter != nil {
-		// -structs flag is specified
 		_, shouldProcess = structFilter[name]
 		processAllExported = shouldProcess
 	} else {
-		// No -structs flag: use existing behavior
 		hasResetTag := checkHasResetTag(st.Fields)
 		hasDirective := hasResetgenDirective(genDecl)
 		shouldProcess = hasResetTag || hasDirective
@@ -183,29 +182,23 @@ func parseStruct(name string, st *ast.StructType, genDecl *ast.GenDecl, structFi
 	var fields []types.FieldInfo
 	hasNonIgnoredFields := false
 
-	// Single pass: Process all fields in order
 	for _, field := range st.Fields.List {
 		var tag string
 		var hasTag bool
 
-		// Check if field has a reset tag
 		if field.Tag != nil {
 			tag, hasTag = parseTag(field.Tag.Value)
 		}
 
-		// Handle embedded fields
 		if len(field.Names) == 0 {
-			// Skip if no tag and not processing all exported
 			if !hasTag && !processAllExported {
 				continue
 			}
 
-			// Skip unexported embedded types (when processing all exported)
 			if processAllExported && !isExportedType(field.Type) {
 				continue
 			}
 
-			// Process embedded field
 			tagVal := ""
 			if hasTag {
 				tagVal = tag
@@ -218,19 +211,15 @@ func parseStruct(name string, st *ast.StructType, genDecl *ast.GenDecl, structFi
 			continue
 		}
 
-		// Handle named fields
 		for _, ident := range field.Names {
-			// Skip if no tag and not processing all exported
 			if !hasTag && !processAllExported {
 				continue
 			}
 
-			// Skip unexported fields (when processing all exported)
 			if processAllExported && !ast.IsExported(ident.Name) {
 				continue
 			}
 
-			// Process named field
 			tagVal := ""
 			if hasTag {
 				tagVal = tag
@@ -243,7 +232,6 @@ func parseStruct(name string, st *ast.StructType, genDecl *ast.GenDecl, structFi
 		}
 	}
 
-	// If no fields were actually added, or all fields are ignored, skip struct
 	if len(fields) == 0 || !hasNonIgnoredFields {
 		return nil
 	}
@@ -263,6 +251,8 @@ func parseTag(tagLit string) (string, bool) {
 	return st.Lookup(tagName)
 }
 
+// parseField creates a FieldInfo from an AST field expression and tag value.
+// Determines the field's type kind, name, and reset action based on the tag.
 func parseField(name string, typeExpr ast.Expr, tagVal string, embedded bool) types.FieldInfo {
 	fi := types.FieldInfo{
 		Name:       name,
@@ -341,6 +331,7 @@ func getEmbeddedName(expr ast.Expr) string {
 	}
 }
 
+// exprToString converts an AST expression to its string representation.
 func exprToString(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:

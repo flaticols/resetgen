@@ -18,10 +18,10 @@ var Analyzer = &analysis.Analyzer{
 	Run:      run,
 }
 
+// run performs the analysis on all function declarations and literals in the pass.
 func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
-	// Analyze each function separately
 	nodeFilter := []ast.Node{
 		(*ast.FuncDecl)(nil),
 		(*ast.FuncLit)(nil),
@@ -45,11 +45,11 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
+// analyzeFunction checks a function body for sync.Pool.Put() calls without preceding Reset() calls.
+// Tracks which variables have had Reset() called on them and reports violations.
 func analyzeFunction(pass *analysis.Pass, body *ast.BlockStmt) {
-	// Track variables that had Reset() called on them
 	resetCalled := make(map[string]bool)
 
-	// Walk statements in order
 	ast.Inspect(body, func(n ast.Node) bool {
 		stmt, ok := n.(*ast.ExprStmt)
 		if !ok {
@@ -66,7 +66,6 @@ func analyzeFunction(pass *analysis.Pass, body *ast.BlockStmt) {
 			return true
 		}
 
-		// Check for x.Reset() calls - track any variable that had Reset called
 		if sel.Sel.Name == "Reset" && len(call.Args) == 0 {
 			varName := extractVarName(sel.X)
 			if varName != "" {
@@ -74,7 +73,6 @@ func analyzeFunction(pass *analysis.Pass, body *ast.BlockStmt) {
 			}
 		}
 
-		// Check for sync.Pool.Put(x) calls
 		if sel.Sel.Name == "Put" && isSyncPoolMethod(sel, pass.TypesInfo) {
 			if len(call.Args) == 1 {
 				varName := extractVarName(call.Args[0])
@@ -88,14 +86,11 @@ func analyzeFunction(pass *analysis.Pass, body *ast.BlockStmt) {
 	})
 }
 
-// extractVarName gets the variable name from an expression
-// Handles: x, s.x, s.field.x
 func extractVarName(expr ast.Expr) string {
 	switch e := expr.(type) {
 	case *ast.Ident:
 		return e.Name
 	case *ast.SelectorExpr:
-		// For s.field, we still track by the root identifier
 		return extractVarName(e.X)
 	case *ast.StarExpr:
 		return extractVarName(e.X)
@@ -103,7 +98,6 @@ func extractVarName(expr ast.Expr) string {
 	return ""
 }
 
-// isSyncPoolMethod checks if sel is a method on sync.Pool
 func isSyncPoolMethod(sel *ast.SelectorExpr, info *types.Info) bool {
 	tv, ok := info.Types[sel.X]
 	if !ok {

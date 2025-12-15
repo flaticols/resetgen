@@ -24,8 +24,35 @@ go install github.com/flaticols/resetgen@latest
 Or add as a tool dependency (Go 1.24+):
 
 ```bash
-go get -tool github.com/flaticols/resetgen
+go get -tool github.com/flaticols/resetgen@latest
 ```
+
+### Go 1.24+ Tool Mechanism
+
+Go 1.24 introduced the ability to manage CLI tools as dependencies. You can declare tool requirements in `go.mod`:
+
+```go
+tool (
+    github.com/flaticols/resetgen
+)
+```
+
+Run with `go tool`:
+
+```bash
+# Generate from current package
+go tool resetgen
+
+# Generate from specific packages
+go tool resetgen ./...
+go tool resetgen ./cmd ./internal
+
+# With flags
+go tool resetgen -structs User,Order ./...
+go tool resetgen -version
+```
+
+This approach keeps your tool versions synchronized with your project, just like regular dependencies.
 
 ### Usage
 
@@ -68,6 +95,136 @@ func (s *Request) Reset() {
 | `reset:""` | Zero value |
 | `reset:"value"` | Default value |
 | `reset:"-"` | Skip field |
+
+## CLI Flag Syntax
+
+### `-structs` Flag
+
+Specify which structs to generate using the `-structs` flag:
+
+```bash
+//go:generate resetgen -structs User,Order,Config
+
+# Or with multiple files
+resetgen -structs User,Order,Config ./...
+```
+
+When `-structs` is specified:
+- **ONLY** the listed structs are processed (tags and directives are ignored for struct selection)
+- All exported fields are reset to zero values
+- Field-level `reset` tags still work for custom values or to skip specific fields
+
+**Example:**
+```go
+//go:generate resetgen -structs User,Order
+
+type User struct {
+    ID      int64
+    Name    string
+    Secret  string `reset:"-"` // Still respected - field will not be reset
+}
+
+type Order struct {
+    ID    int64
+    Items []string
+    Total float64 `reset:"0.0"` // Custom value still works
+}
+
+type Logger struct {
+    Level string  // Will NOT be generated (not in -structs list)
+}
+```
+
+### Package-Qualified Names
+
+When you have structs with the same name in different packages, use package-qualified names:
+
+```bash
+# Process User in models package only
+resetgen -structs models.User ./...
+
+# Process User in both models and api packages
+resetgen -structs models.User,api.User ./...
+
+# Mix simple and qualified names
+resetgen -structs Order,models.User ./...
+```
+
+**Rules:**
+- Simple name (`User`) → processes ALL User structs in all packages
+- Qualified name (`models.User`) → processes only User in models package
+- Package path uses Go import path format (lowercase with dots/slashes)
+
+**Example with multiple packages:**
+```go
+// models/user.go
+//go:generate resetgen -structs models.User,api.User
+
+package models
+
+type User struct {
+    ID    int64  `reset:""`
+    Name  string `reset:""`
+    Email string `reset:""`
+}
+
+// api/user.go
+//go:generate resetgen -structs models.User,api.User
+
+package api
+
+type User struct {
+    ID       string `reset:""`
+    Status   string `reset:"active"`
+}
+```
+
+Both packages can use the same go:generate directive with package-qualified names, and each will generate only its own Reset() method.
+
+## Directive Syntax
+
+Use the `+resetgen` comment directive to mark structs for automatic `Reset()` generation without tagging every field:
+
+```go
+//go:generate resetgen
+
+package main
+
+// +resetgen
+type Request struct {
+    ID      string            // defaults to zero value
+    Method  string            // defaults to zero value
+    Headers map[string]string // defaults to zero value
+    Secret  string `reset:"-"` // skipped from reset
+}
+```
+
+Generated `request.gen.go`:
+
+```go
+func (s *Request) Reset() {
+    s.ID = ""
+    s.Method = ""
+    clear(s.Headers)  // preserves capacity
+    // Secret is not reset (reset:"-")
+}
+```
+
+### How Directive Works
+
+- **Struct Selection**: Structs are processed if they have a `+resetgen` comment OR contain `reset` tags
+- **Field Processing**: All exported fields are reset to zero values
+- **Custom Values**: Fields with explicit `reset` tags use their specified values
+- **Skip Fields**: Use `reset:"-"` to exclude specific fields from reset
+- **Unexported Fields**: Private fields (lowercase) are automatically skipped for safety
+
+### Directive Formats
+
+All of these are recognized:
+- `//+resetgen`
+- `// +resetgen`
+- `//  +resetgen`
+- `/* +resetgen */`
 
 ## Features
 

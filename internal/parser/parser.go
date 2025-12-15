@@ -11,10 +11,14 @@ import (
 	"github.com/flaticols/resetgen/internal/types"
 )
 
-const tagName = "reset"
+const (
+	tagName       = "reset"
+	toolDirective = "+resetgen"
+)
 
 // ParseFile parses a Go source file and extracts structs with reset tags.
-func ParseFile(path string) (*types.FileInfo, error) {
+// If structFilter is provided, only the listed struct names are processed.
+func ParseFile(path string, structFilter map[string]bool) (*types.FileInfo, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -43,7 +47,7 @@ func ParseFile(path string) (*types.FileInfo, error) {
 				continue
 			}
 
-			structInfo := parseStruct(typeSpec.Name.Name, structType)
+			structInfo := parseStruct(typeSpec.Name.Name, structType, genDecl, structFilter)
 			if structInfo != nil {
 				structInfo.PkgName = info.PkgName
 				info.Structs = append(info.Structs, *structInfo)
@@ -55,7 +59,14 @@ func ParseFile(path string) (*types.FileInfo, error) {
 }
 
 // ParseSource parses Go source code from a string.
+// Kept for backward compatibility with existing tests.
 func ParseSource(src string) (*types.FileInfo, error) {
+	return ParseSourceWithFilter(src, nil)
+}
+
+// ParseSourceWithFilter parses Go source code with an optional struct filter.
+// If structFilter is provided, only the listed struct names are processed.
+func ParseSourceWithFilter(src string, structFilter map[string]bool) (*types.FileInfo, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "source.go", src, parser.ParseComments)
 	if err != nil {
@@ -84,7 +95,7 @@ func ParseSource(src string) (*types.FileInfo, error) {
 				continue
 			}
 
-			structInfo := parseStruct(typeSpec.Name.Name, structType)
+			structInfo := parseStruct(typeSpec.Name.Name, structType, genDecl, structFilter)
 			if structInfo != nil {
 				structInfo.PkgName = info.PkgName
 				info.Structs = append(info.Structs, *structInfo)
@@ -95,39 +106,133 @@ func ParseSource(src string) (*types.FileInfo, error) {
 	return info, nil
 }
 
-func parseStruct(name string, st *ast.StructType) *types.StructInfo {
+// hasResetgenDirective reports whether genDecl has the +resetgen comment directive.
+// Recognizes various formats: "//+resetgen", "// +resetgen", "/*+resetgen*/", etc.
+func hasResetgenDirective(genDecl *ast.GenDecl) bool {
+	if genDecl.Doc == nil {
+		return false
+	}
+
+	for _, comment := range genDecl.Doc.List {
+		text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+		text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
+		text = strings.TrimSuffix(strings.TrimSpace(text), "*/")
+
+		if strings.HasPrefix(text, toolDirective) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isExportedType reports whether expr refers to an exported type.
+// Pointer-to-type and package-qualified types are considered exported.
+func isExportedType(expr ast.Expr) bool {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return ast.IsExported(t.Name)
+	case *ast.StarExpr:
+		return isExportedType(t.X)
+	case *ast.SelectorExpr:
+		return true
+	default:
+		return false
+	}
+}
+
+// checkHasResetTag reports whether any field in the struct has a reset tag.
+func checkHasResetTag(fields *ast.FieldList) bool {
+	for _, field := range fields.List {
+		if field.Tag != nil {
+			if _, hasTag := parseTag(field.Tag.Value); hasTag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseStruct extracts struct field information based on reset tags and directives.
+// When structFilter is provided, all exported fields are included; otherwise only
+// fields with reset tags or structs with +resetgen directives are processed.
+// Returns nil if the struct should not be processed or has no non-ignored fields.
+func parseStruct(name string, st *ast.StructType, genDecl *ast.GenDecl, structFilter map[string]bool) *types.StructInfo {
 	if st.Fields == nil {
 		return nil
 	}
 
+	var shouldProcess bool
+	var processAllExported bool
+
+	if structFilter != nil {
+		_, shouldProcess = structFilter[name]
+		processAllExported = shouldProcess
+	} else {
+		hasResetTag := checkHasResetTag(st.Fields)
+		hasDirective := hasResetgenDirective(genDecl)
+		shouldProcess = hasResetTag || hasDirective
+		processAllExported = hasDirective
+	}
+
+	if !shouldProcess {
+		return nil
+	}
+
 	var fields []types.FieldInfo
-	hasResetTag := false
+	hasNonIgnoredFields := false
 
 	for _, field := range st.Fields.List {
-		if field.Tag == nil {
-			continue
-		}
+		var tag string
+		var hasTag bool
 
-		tag, ok := parseTag(field.Tag.Value)
-		if !ok {
-			continue
+		if field.Tag != nil {
+			tag, hasTag = parseTag(field.Tag.Value)
 		}
-
-		hasResetTag = true
 
 		if len(field.Names) == 0 {
-			fi := parseField("", field.Type, tag, true)
+			if !hasTag && !processAllExported {
+				continue
+			}
+
+			if processAllExported && !isExportedType(field.Type) {
+				continue
+			}
+
+			tagVal := ""
+			if hasTag {
+				tagVal = tag
+			}
+			fi := parseField("", field.Type, tagVal, true)
 			fields = append(fields, fi)
+			if fi.Action != types.ActionIgnore {
+				hasNonIgnoredFields = true
+			}
 			continue
 		}
 
 		for _, ident := range field.Names {
-			fi := parseField(ident.Name, field.Type, tag, false)
+			if !hasTag && !processAllExported {
+				continue
+			}
+
+			if processAllExported && !ast.IsExported(ident.Name) {
+				continue
+			}
+
+			tagVal := ""
+			if hasTag {
+				tagVal = tag
+			}
+			fi := parseField(ident.Name, field.Type, tagVal, false)
 			fields = append(fields, fi)
+			if fi.Action != types.ActionIgnore {
+				hasNonIgnoredFields = true
+			}
 		}
 	}
 
-	if !hasResetTag {
+	if len(fields) == 0 || !hasNonIgnoredFields {
 		return nil
 	}
 
@@ -146,6 +251,8 @@ func parseTag(tagLit string) (string, bool) {
 	return st.Lookup(tagName)
 }
 
+// parseField creates a FieldInfo from an AST field expression and tag value.
+// Determines the field's type kind, name, and reset action based on the tag.
 func parseField(name string, typeExpr ast.Expr, tagVal string, embedded bool) types.FieldInfo {
 	fi := types.FieldInfo{
 		Name:       name,
@@ -224,6 +331,7 @@ func getEmbeddedName(expr ast.Expr) string {
 	}
 }
 
+// exprToString converts an AST expression to its string representation.
 func exprToString(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:

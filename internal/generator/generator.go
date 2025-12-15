@@ -7,7 +7,8 @@ import (
 	"github.com/flaticols/resetgen/internal/types"
 )
 
-// Generate produces Reset() methods for all structs in the file info.
+// Generate produces Reset() methods for all structs in the file info, including package
+// declaration, imports, and all Reset() method implementations.
 func Generate(info *types.FileInfo) string {
 	if len(info.Structs) == 0 {
 		return ""
@@ -44,7 +45,7 @@ func Generate(info *types.FileInfo) string {
 	return b.String()
 }
 
-// GenerateStruct produces a Reset() method for a single struct.
+// GenerateStruct generates a single Reset() method for a struct.
 func GenerateStruct(s *types.StructInfo) string {
 	var b strings.Builder
 	b.Grow(512)
@@ -52,6 +53,8 @@ func GenerateStruct(s *types.StructInfo) string {
 	return b.String()
 }
 
+// collectImports extracts all required standard library imports from struct fields.
+// Maps common package aliases to their full import paths.
 func collectImports(structs []types.StructInfo) []string {
 	pkgSet := make(map[string]bool)
 
@@ -73,6 +76,7 @@ func collectImports(structs []types.StructInfo) []string {
 	return imports
 }
 
+// extractPackage maps package aliases to their full import paths for standard library types.
 func extractPackage(typeStr string) string {
 	t := strings.TrimPrefix(typeStr, "*")
 	idx := strings.Index(t, ".")
@@ -150,6 +154,8 @@ func generateFieldReset(b *strings.Builder, f *types.FieldInfo) {
 	}
 }
 
+// generateDefaultReset writes the code to reset a field to its default value.
+// For slices/maps and embedded structs, delegates to appropriate zero-reset logic.
 func generateDefaultReset(b *strings.Builder, f *types.FieldInfo, accessor string) {
 	switch f.Kind {
 	case types.KindSlice, types.KindMap:
@@ -181,6 +187,8 @@ func generateDefaultReset(b *strings.Builder, f *types.FieldInfo, accessor strin
 	}
 }
 
+// generateZeroReset writes the code to reset a field to its zero value.
+// Handles embedded types by calling their Reset(), slices by truncating, and maps by clearing.
 func generateZeroReset(b *strings.Builder, f *types.FieldInfo, accessor string) {
 	if f.IsEmbedded {
 		if isExternalType(f.TypeStr) {
@@ -299,6 +307,7 @@ func formatDefault(f *types.FieldInfo) string {
 	}
 }
 
+// zeroValue returns the zero value literal for a Go type.
 func zeroValue(typeStr string) string {
 	switch typeStr {
 	case "string":
